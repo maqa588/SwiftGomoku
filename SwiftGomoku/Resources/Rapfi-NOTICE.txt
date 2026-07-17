@@ -1,0 +1,14 @@
+Bundled Rapfi Engine
+
+Rapfi 0.43.02, built for macOS ARM64 with NEON.
+Copyright Rapfi developers and contributors.
+Licensed under GNU GPL version 3.
+
+Exact corresponding source:
+https://github.com/dhbloo/rapfi/tree/3aedf3a2ab0ab710a9f3d00e57d5287ceb864894
+
+Binary SHA-256:
+01c815748c9d3cb4f2a621f446b2595f6b4a42ccb34043ba4cbd43afe9017e63
+
+The complete GNU GPL version 3 is included as GPL-3.0.txt.
+The upstream author list is included as Rapfi-AUTHORS.txt.

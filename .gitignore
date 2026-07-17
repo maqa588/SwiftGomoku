@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Build products
+DerivedData/
+build/
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Signing and local secrets
+.env
+.env.*
+!.env.example
+Local.xcconfig
+Secrets.xcconfig
+*.mobileprovision
+*.p12
+*.cer
+*.key
+
+# Local engine binaries, models, and logs outside the app's bundled resources
+/Engines/
+/Models/
+*.log
