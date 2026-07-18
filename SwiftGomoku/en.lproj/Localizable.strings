@@ -120,3 +120,5 @@
 "duration.seconds" = "%d seconds";
 "state.off" = "Off";
 "sidebar.sound_summary" = "%@ · %d%%";
+"button.done" = "Done";
+

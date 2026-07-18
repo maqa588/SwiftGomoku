@@ -7,6 +7,11 @@ struct GomokuBoardView: View {
     let onPlay: (BoardPoint) -> Void
     @State private var hoveredPoint: BoardPoint?
 
+    // iOS double-tap state
+    #if os(iOS)
+    @State private var pendingPoint: BoardPoint?
+    #endif
+
     var body: some View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
@@ -14,6 +19,28 @@ struct GomokuBoardView: View {
                               width: side, height: side)
             Canvas { context, _ in drawBoard(in: rect, context: &context) }
                 .contentShape(Rectangle())
+                #if os(iOS)
+                .gesture(SpatialTapGesture().onEnded { value in
+                    guard isInteractive else { return }
+                    guard let tapped = point(at: value.location, in: rect) else {
+                        pendingPoint = nil
+                        return
+                    }
+                    // Skip if already occupied
+                    if moves.contains(where: { $0.point == tapped }) {
+                        pendingPoint = nil
+                        return
+                    }
+                    if pendingPoint == tapped {
+                        // Second tap on same point → confirm
+                        pendingPoint = nil
+                        onPlay(tapped)
+                    } else {
+                        // First tap → show ghost
+                        pendingPoint = tapped
+                    }
+                })
+                #else
                 .gesture(SpatialTapGesture().onEnded { value in
                     if isInteractive, let point = point(at: value.location, in: rect) { onPlay(point) }
                 })
@@ -23,12 +50,19 @@ struct GomokuBoardView: View {
                     case .ended: hoveredPoint = nil
                     }
                 }
+                #endif
         }
         .aspectRatio(1, contentMode: .fit)
-        .padding(18)
+        .padding(10)
         .background(RoundedRectangle(cornerRadius: 28).fill(Color(red: 0.82, green: 0.64, blue: 0.37))
             .shadow(color: .black.opacity(0.18), radius: 28, y: 14))
         .accessibilityLabel(L10n.format("board.accessibility_label", boardSize))
+        #if os(iOS)
+        // Dismiss pending point when interactivity changes
+        .onChange(of: isInteractive) { _, newValue in
+            if !newValue { pendingPoint = nil }
+        }
+        #endif
     }
 
     private func drawBoard(in rect: CGRect, context: inout GraphicsContext) {
@@ -45,10 +79,21 @@ struct GomokuBoardView: View {
             let center = screenPoint(point, origin: origin, cell: cell), d = max(4, cell * 0.16)
             context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(.black.opacity(0.72)))
         }
-        if let hoveredPoint, !moves.contains(where: { $0.point == hoveredPoint }) {
-            let center = screenPoint(hoveredPoint, origin: origin, cell: cell), d = cell * 0.76
+        // Ghost stone: hover on macOS, pending (first-tap) on iOS
+        #if os(iOS)
+        let ghostPoint = pendingPoint
+        #else
+        let ghostPoint = hoveredPoint
+        #endif
+        if let ghostPoint, !moves.contains(where: { $0.point == ghostPoint }) {
+            let center = screenPoint(ghostPoint, origin: origin, cell: cell), d = cell * 0.76
             let color: Color = moves.count.isMultiple(of: 2) ? .black : .white
+            #if os(iOS)
+            // More visible ghost on iOS (pending confirmation)
+            context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(color.opacity(0.45)))
+            #else
             context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(color.opacity(0.25)))
+            #endif
         }
         for (index, move) in moves.enumerated() { drawStone(move, last: index == moves.count-1, origin: origin, cell: cell, context: &context) }
     }

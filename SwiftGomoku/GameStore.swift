@@ -7,7 +7,9 @@ final class GameStore: ObservableObject {
     @Published var rule: GameRule = .freestyle
     @Published var humanColor: Stone = .black
     @Published var boardSize = 15
-    @Published var timeoutSeconds = 5
+    @Published var timeoutSeconds: Int {
+        didSet { UserDefaults.standard.set(timeoutSeconds, forKey: Self.timeoutSecondsKey) }
+    }
     @Published var showsProtocolLog = false
     @Published var threadCount: Int {
         didSet { UserDefaults.standard.set(threadCount, forKey: Self.threadCountKey) }
@@ -25,7 +27,7 @@ final class GameStore: ObservableObject {
     @Published private(set) var phase: GamePhase = .idle
     @Published private(set) var notice: String?
     @Published private(set) var customEnginePath: String?
-
+ 
     let engine = PiskvorkEngine()
     private let stoneSound = StoneSoundEngine()
     private static let enginePathKey = "PiskvorkEnginePath"
@@ -33,10 +35,13 @@ final class GameStore: ObservableObject {
     private static let soundEnabledKey = "StoneSoundEnabled"
     private static let boardMaterialKey = "StoneSoundBoardMaterial"
     private static let soundVolumeKey = "StoneSoundVolume"
+    private static let timeoutSecondsKey = "PiskvorkTimeoutSeconds"
     private var rebuildWhenReady = false
-
+ 
     init() {
         let defaults = UserDefaults.standard
+        let savedTimeout = defaults.integer(forKey: Self.timeoutSecondsKey)
+        timeoutSeconds = savedTimeout > 0 ? savedTimeout : 5
         customEnginePath = defaults.string(forKey: Self.enginePathKey).flatMap { $0.isEmpty ? nil : $0 }
         let savedThreads = defaults.integer(forKey: Self.threadCountKey)
         threadCount = savedThreads > 0 ? min(savedThreads, Self.maximumThreadCount) : Self.recommendedThreadCount
@@ -53,8 +58,20 @@ final class GameStore: ObservableObject {
 
     var engineColor: Stone { humanColor.opponent }
     var enginePath: String { customEnginePath ?? Self.bundledEngineURL?.path ?? "" }
-    var isUsingBundledEngine: Bool { customEnginePath == nil && Self.bundledEngineURL != nil }
-    var bundledEngineAvailable: Bool { Self.bundledEngineURL != nil }
+    var isUsingBundledEngine: Bool {
+        #if os(iOS)
+        return customEnginePath == nil
+        #else
+        return customEnginePath == nil && Self.bundledEngineURL != nil
+        #endif
+    }
+    var bundledEngineAvailable: Bool {
+        #if os(iOS)
+        return true
+        #else
+        return Self.bundledEngineURL != nil
+        #endif
+    }
     var engineDisplayName: String {
         if isUsingBundledEngine { return L10n.text("engine.bundled.name") }
         guard !enginePath.isEmpty else { return L10n.text("engine.none") }
@@ -148,6 +165,7 @@ final class GameStore: ObservableObject {
     func shutdown() { engine.stop(); stoneSound.stop() }
 
     private func validateEngine() -> Bool {
+        if isUsingBundledEngine { return true }
         guard !enginePath.isEmpty else { phase = .error(L10n.text("error.engine.not_selected")); return false }
         var directory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: enginePath, isDirectory: &directory), !directory.boolValue else {
@@ -162,7 +180,13 @@ final class GameStore: ObservableObject {
     private func launchEngine(rebuild: Bool) {
         guard validateEngine() else { return }
         rebuildWhenReady = rebuild
-        do { try engine.launch(executableURL: URL(fileURLWithPath: enginePath), boardSize: boardSize) }
+        do {
+            try engine.launch(
+                executableURL: URL(fileURLWithPath: enginePath),
+                boardSize: boardSize,
+                inMemory: isUsingBundledEngine
+            )
+        }
         catch { phase = .error(L10n.format("error.engine.launch", error.localizedDescription)) }
     }
 

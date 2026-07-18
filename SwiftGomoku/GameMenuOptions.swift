@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 
 enum GameMenuOptions {
     static let boardSizes = [15, 19, 20]
@@ -9,6 +11,7 @@ enum GameMenuOptions {
 @MainActor
 enum EngineSelectionPanel {
     static func present(for game: GameStore) {
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.title = L10n.text("engine.panel.title")
         panel.message = L10n.text("engine.panel.message")
@@ -19,5 +22,8 @@ enum EngineSelectionPanel {
         if panel.runModal() == .OK, let url = panel.url {
             game.setEngineURL(url)
         }
+        #elseif os(iOS)
+        // No-op since external engines are not supported on iOS
+        #endif
     }
 }

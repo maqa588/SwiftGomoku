@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 import SwiftUI
 
 struct ContentView: View {
@@ -6,8 +10,25 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmsNewGame = false
     @State private var confirmsResign = false
+    #if os(iOS)
+    @State private var showingAbout = false
+    @State private var showingSettingsSheet = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     var body: some View {
+        #if os(macOS)
+        splitViewLayout
+        #else
+        if horizontalSizeClass == .compact {
+            iphoneLayout
+        } else {
+            splitViewLayout
+        }
+        #endif
+    }
+
+    private var splitViewLayout: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             configurationSidebar
                 .navigationSplitViewColumnWidth(min: 250, ideal: 280, max: 320)
@@ -38,16 +59,87 @@ struct ContentView: View {
         } message: {
             Text(L10n.text("dialog.resign.message"))
         }
+        #if os(macOS)
         .frame(minWidth: 900, minHeight: 650)
+        #elseif os(iOS)
+        .sheet(isPresented: $showingAbout) {
+            AboutView_iOS()
+        }
+        #endif
         .onDisappear { game.shutdown() }
     }
+
+    #if os(iOS)
+    private var iphoneLayout: some View {
+        NavigationStack {
+            gameArea
+                .navigationTitle("Swift Gomoku")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            showingSettingsSheet = true
+                        } label: {
+                            Label(L10n.text("menu.game_settings"), systemImage: "gearshape")
+                        }
+                    }
+                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                        Button(action: requestNewGame) {
+                            Label(L10n.text("toolbar.new_game"), systemImage: "play.fill")
+                        }
+                        Button(action: game.undo) {
+                            Label(L10n.text("toolbar.undo"), systemImage: "arrow.uturn.backward")
+                        }
+                        .disabled(!game.canUndo)
+                    }
+                }
+                .sheet(isPresented: $showingSettingsSheet) {
+                    iphoneSettingsSheet
+                }
+                .confirmationDialog(
+                    L10n.text("dialog.new_game.title"),
+                    isPresented: $confirmsNewGame,
+                    titleVisibility: .visible
+                ) {
+                    Button(L10n.text("dialog.new_game.confirm"), role: .destructive, action: game.startNewGame)
+                } message: {
+                    Text(L10n.text("dialog.new_game.message"))
+                }
+                .confirmationDialog(
+                    L10n.text("dialog.resign.title"),
+                    isPresented: $confirmsResign,
+                    titleVisibility: .visible
+                ) {
+                    Button(L10n.text("toolbar.resign"), role: .destructive, action: game.resign)
+                } message: {
+                    Text(L10n.text("dialog.resign.message"))
+                }
+        }
+        .onDisappear { game.shutdown() }
+    }
+
+    private var iphoneSettingsSheet: some View {
+        NavigationStack {
+            configurationSidebar
+                .navigationTitle(L10n.text("menu.game_settings"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(L10n.text("button.done")) {
+                            showingSettingsSheet = false
+                        }
+                    }
+                }
+        }
+    }
+    #endif
 
     private var configurationSidebar: some View {
         VStack(spacing: 0) {
             Form {
                 Section(L10n.text("section.game")) {
                     Picker(L10n.text("label.mode"), selection: $game.mode) {
-                        ForEach(MatchMode.allCases) { mode in
+                        ForEach(MatchMode.selectableCases) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
@@ -59,6 +151,12 @@ struct ContentView: View {
                             Text(Stone.white.title).tag(Stone.white)
                         }
                         .pickerStyle(.segmented)
+
+                        Picker(L10n.text("menu.thinking_time"), selection: $game.timeoutSeconds) {
+                            ForEach(GameMenuOptions.timeoutSeconds, id: \.self) { seconds in
+                                Text(L10n.format("duration.seconds", seconds)).tag(seconds)
+                            }
+                        }
                     }
                 }
 
@@ -95,6 +193,26 @@ struct ContentView: View {
 
                     LabeledContent(L10n.text("section.sound"), value: soundSummary)
                 }
+
+                #if os(iOS)
+                Section {
+                    if horizontalSizeClass == .compact {
+                        NavigationLink {
+                            ScrollView {
+                                AboutView()
+                            }
+                            .navigationTitle(L10n.text("about.title"))
+                            .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            Label(L10n.text("about.title"), systemImage: "info.circle")
+                        }
+                    } else {
+                        Button(action: { showingAbout = true }) {
+                            Label(L10n.text("about.title"), systemImage: "info.circle")
+                        }
+                    }
+                }
+                #endif
             }
             .formStyle(.grouped)
 
@@ -185,7 +303,7 @@ struct ContentView: View {
     private var gameSetupMenu: some View {
         Menu(L10n.text("menu.game_settings"), systemImage: "person.2") {
             Picker(L10n.text("label.mode"), selection: $game.mode) {
-                ForEach(MatchMode.allCases) { mode in
+                ForEach(MatchMode.selectableCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
@@ -305,6 +423,9 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 8)
+            #if os(iOS)
+            .frame(height: 64, alignment: .top)
+            #endif
 
             GomokuBoardView(
                 boardSize: game.boardSize,
@@ -313,8 +434,9 @@ struct ContentView: View {
                 onPlay: game.play
             )
         }
-        .padding(24)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.boardBackground)
     }
 
     private var boardIsInteractive: Bool {
@@ -440,4 +562,14 @@ private struct ProtocolLogView: View {
 
 #Preview {
     ContentView(game: GameStore())
+}
+
+extension Color {
+    static var boardBackground: Color {
+        #if os(macOS)
+        return Color(nsColor: .windowBackgroundColor)
+        #else
+        return Color(uiColor: .systemBackground)
+        #endif
+    }
 }

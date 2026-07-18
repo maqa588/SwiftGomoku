@@ -1,6 +1,32 @@
 import Combine
 import Foundation
 
+#if os(iOS)
+class Process: NSObject {
+    var executableURL: URL?
+    var currentDirectoryURL: URL?
+    var standardInput: Any?
+    var standardOutput: Any?
+    var standardError: Any?
+    var environment: [String: String]?
+    var terminationHandler: ((Process) -> Void)?
+    var isRunning: Bool { false }
+    var terminationStatus: Int32 { 0 }
+    func run() throws {
+        throw NSError(domain: "ProcessError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Process spawning is not supported on iOS."])
+    }
+    func terminate() {}
+}
+#endif
+
+private let globalEngineCallback: @convention(c) (UnsafePointer<CChar>?) -> Void = { output in
+    guard let output = output else { return }
+    let line = String(cString: output)
+    Task { @MainActor in
+        PiskvorkEngine.activeInstance?.handleOutputLine(line)
+    }
+}
+
 @MainActor
 final class PiskvorkEngine: ObservableObject {
     enum State: Equatable {
@@ -34,6 +60,8 @@ final class PiskvorkEngine: ObservableObject {
     var onFailure: ((String) -> Void)?
     var onMessage: ((String) -> Void)?
 
+    static weak var activeInstance: PiskvorkEngine?
+
     private var process: Process?
     private var inputPipe: Pipe?
     private var outputPipe: Pipe?
@@ -41,50 +69,60 @@ final class PiskvorkEngine: ObservableObject {
     private var outputBuffer = Data()
     private var waitingForStart = false
     private var stopping = false
+    private var isInMemory = false
 
-    func launch(executableURL: URL, boardSize: Int) throws {
+    func launch(executableURL: URL, boardSize: Int, inMemory: Bool = false) throws {
         stop()
         logs.removeAll(keepingCapacity: true)
         state = .launching
         stopping = false
+        isInMemory = inMemory
 
-        let task = Process(), input = Pipe(), output = Pipe(), error = Pipe()
-        task.executableURL = executableURL
-        task.currentDirectoryURL = executableURL.deletingLastPathComponent()
-        task.standardInput = input
-        task.standardOutput = output
-        task.standardError = error
-        task.environment = ProcessInfo.processInfo.environment.merging(["LC_ALL": "C", "LANG": "C"]) { _, new in new }
+        if inMemory {
+            PiskvorkEngine.activeInstance = self
+            rapfi_init(globalEngineCallback, 0, nil)
+            state = .waitingForReady
+            waitingForStart = true
+            send("START \(boardSize)")
+        } else {
+            let task = Process(), input = Pipe(), output = Pipe(), error = Pipe()
+            task.executableURL = executableURL
+            task.currentDirectoryURL = executableURL.deletingLastPathComponent()
+            task.standardInput = input
+            task.standardOutput = output
+            task.standardError = error
+            task.environment = ProcessInfo.processInfo.environment.merging(["LC_ALL": "C", "LANG": "C"]) { _, new in new }
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.consume(data) }
-        }
-        error.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.log(.diagnostic, text.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        }
-        task.terminationHandler = { [weak self] task in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                // An older process can finish after a new game has already launched.
-                // Never let that stale callback tear down the new process's pipes.
-                guard self.process === task else { return }
-                self.cleanup()
-                self.process = nil
-                if !self.stopping && task.terminationStatus != 0 {
-                    self.fail(L10n.format("error.engine.exited", task.terminationStatus))
-                } else { self.state = .stopped }
+            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty else { return }
+                Task { @MainActor [weak self] in self?.consume(data) }
             }
-        }
+            error.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
+                Task { @MainActor [weak self] in self?.log(.diagnostic, text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            }
+            task.terminationHandler = { [weak self] task in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // An older process can finish after a new game has already launched.
+                    // Never let that stale callback tear down the new process's pipes.
+                    guard self.process === task else { return }
+                    self.cleanup()
+                    self.process = nil
+                    if !self.stopping && task.terminationStatus != 0 {
+                        self.fail(L10n.format("error.engine.exited", task.terminationStatus))
+                      } else { self.state = .stopped }
+                }
+            }
 
-        do { try task.run() } catch { state = .failed(error.localizedDescription); throw error }
-        process = task; inputPipe = input; outputPipe = output; errorPipe = error
-        state = .waitingForReady
-        waitingForStart = true
-        send("START \(boardSize)")
+            do { try task.run() } catch { state = .failed(error.localizedDescription); throw error }
+            process = task; inputPipe = input; outputPipe = output; errorPipe = error
+            state = .waitingForReady
+            waitingForStart = true
+            send("START \(boardSize)")
+        }
     }
 
     func configure(timeoutSeconds: Int, rule: GameRule, threadCount: Int) {
@@ -110,20 +148,38 @@ final class PiskvorkEngine: ObservableObject {
     }
 
     func send(_ line: String) {
-        guard let data = "\(line)\r\n".data(using: .utf8), let handle = inputPipe?.fileHandleForWriting else { return }
-        do { try handle.write(contentsOf: data); log(.sent, line) }
-        catch { fail(L10n.format("error.engine.write", error.localizedDescription)) }
+        if isInMemory {
+            log(.sent, line)
+            rapfi_send_command(line)
+        } else {
+            guard let data = "\(line)\r\n".data(using: .utf8), let handle = inputPipe?.fileHandleForWriting else { return }
+            do { try handle.write(contentsOf: data); log(.sent, line) }
+            catch { fail(L10n.format("error.engine.write", error.localizedDescription)) }
+        }
     }
 
     func clearLogs() { logs.removeAll(keepingCapacity: true) }
 
     func stop() {
+        if isInMemory {
+            rapfi_send_command("END")
+            rapfi_shutdown()
+            isInMemory = false
+            state = .stopped
+            return
+        }
         guard let process else { state = .stopped; return }
         stopping = true
         if process.isRunning { send("END"); process.terminate() }
         cleanup()
         self.process = nil
         state = .stopped
+    }
+
+    func handleOutputLine(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        handle(trimmed)
     }
 
     private func consume(_ data: Data) {

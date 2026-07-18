@@ -35,6 +35,10 @@ enum MatchMode: String, CaseIterable, Identifiable {
     case engine, local
     var id: String { rawValue }
     var title: String { L10n.text(self == .engine ? "mode.engine" : "mode.local") }
+
+    static var selectableCases: [MatchMode] {
+        return [.engine, .local]
+    }
 }
 
 enum GameRule: String, CaseIterable, Identifiable {

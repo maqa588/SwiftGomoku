@@ -120,3 +120,5 @@
 "duration.seconds" = "%d 秒";
 "state.off" = "已关闭";
 "sidebar.sound_summary" = "%@ · %d%%";
+"button.done" = "完成";
+

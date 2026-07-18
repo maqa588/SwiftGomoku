@@ -10,6 +10,17 @@ final class StoneSoundEngine {
     private var nextVoice = 0
 
     init() {
+        #if os(iOS)
+        Task.detached(priority: .background) {
+            do {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.ambient, options: [])
+                try session.setActive(true)
+            } catch {
+                print("Failed to set up AVAudioSession: \(error)")
+            }
+        }
+        #endif
         for voice in voices {
             engine.attach(voice)
             engine.connect(voice, to: engine.mainMixerNode, format: format)

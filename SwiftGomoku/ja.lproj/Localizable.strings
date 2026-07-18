@@ -120,3 +120,5 @@
 "duration.seconds" = "%d秒";
 "state.off" = "オフ";
 "sidebar.sound_summary" = "%@・%d%%";
+"button.done" = "完了";
+

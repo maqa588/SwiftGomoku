@@ -6,6 +6,7 @@ struct SwiftGomokuApp: App {
     @StateObject private var game = GameStore()
 
     var body: some Scene {
+        #if os(macOS)
         WindowGroup { ContentView(game: game) }
             .defaultSize(width: 1120, height: 760)
             .commands { SwiftGomokuCommands(game: game) }
@@ -14,6 +15,9 @@ struct SwiftGomokuApp: App {
             AboutView()
         }
         .windowResizability(.contentSize)
+        #else
+        WindowGroup { ContentView(game: game) }
+        #endif
     }
 }
 
@@ -47,7 +51,7 @@ private struct SwiftGomokuCommands: Commands {
             Divider()
 
             Picker(L10n.text("label.mode"), selection: $game.mode) {
-                ForEach(MatchMode.allCases) { mode in
+                ForEach(MatchMode.selectableCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
