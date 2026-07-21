@@ -115,6 +115,7 @@ private struct SwiftGomokuCommands: Commands {
             Button(game.engineDisplayName) { }
                 .disabled(true)
 
+            #if os(macOS)
             Button(L10n.text("button.import_engine"), systemImage: "square.and.arrow.down") {
                 EngineSelectionPanel.present(for: game)
             }
@@ -126,6 +127,7 @@ private struct SwiftGomokuCommands: Commands {
             }
 
             Divider()
+            #endif
 
             Menu(L10n.format("label.threads", game.threadCount)) {
                 Button(L10n.text("menu.decrease_threads"), systemImage: "minus") {

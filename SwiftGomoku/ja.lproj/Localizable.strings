@@ -1,7 +1,8 @@
 "stone.black" = "黒";
 "stone.white" = "白";
-"mode.engine" = "対エンジン";
-"mode.local" = "2人対戦";
+"mode.engine" = "人機";
+"mode.local" = "二人";
+"mode.self_play" = "機器";
 "rule.freestyle" = "フリースタイル";
 "rule.exact_five" = "五連のみ";
 "rule.renju" = "連珠";
@@ -20,6 +21,7 @@
 "status.thinking.detail" = "1手につき最大%d秒";
 "status.game_over.detail" = "全%d手";
 "result.winner" = "%@の勝ち";
+"result.forbidden_loss" = "黒が禁手を打ったため、%@の勝ち";
 "result.draw" = "引き分け";
 
 "engine.state.stopped" = "停止中";
@@ -64,6 +66,7 @@
 "button.choose" = "選択…";
 "button.select" = "選択";
 "button.clear" = "消去";
+"button.start_new_game" = "新しい対局を開始";
 "engine.choose_hint" = "Rapfi または Piskvork 対応エンジンを選択してください。";
 "moves.count" = "%d手";
 

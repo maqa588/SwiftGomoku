@@ -32,12 +32,18 @@ struct Move: Identifiable, Hashable {
 }
 
 enum MatchMode: String, CaseIterable, Identifiable {
-    case engine, local
+    case engine, local, selfPlay
     var id: String { rawValue }
-    var title: String { L10n.text(self == .engine ? "mode.engine" : "mode.local") }
+    var title: String {
+        switch self {
+        case .engine: L10n.text("mode.engine")
+        case .local: L10n.text("mode.local")
+        case .selfPlay: L10n.text("mode.self_play")
+        }
+    }
 
     static var selectableCases: [MatchMode] {
-        return [.engine, .local]
+        return [.engine, .local, .selfPlay]
     }
 }
 

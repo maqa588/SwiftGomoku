@@ -56,21 +56,12 @@ final class GameStore: ObservableObject {
         engine.onMessage = { [weak self] in self?.notice = $0 }
     }
 
-    var engineColor: Stone { humanColor.opponent }
-    var enginePath: String { customEnginePath ?? Self.bundledEngineURL?.path ?? "" }
+    var enginePath: String { customEnginePath ?? "" }
     var isUsingBundledEngine: Bool {
-        #if os(iOS)
         return customEnginePath == nil
-        #else
-        return customEnginePath == nil && Self.bundledEngineURL != nil
-        #endif
     }
     var bundledEngineAvailable: Bool {
-        #if os(iOS)
         return true
-        #else
-        return Self.bundledEngineURL != nil
-        #endif
     }
     var engineDisplayName: String {
         if isUsingBundledEngine { return L10n.text("engine.bundled.name") }
@@ -81,8 +72,18 @@ final class GameStore: ObservableObject {
     static let recommendedThreadCount = max(maximumThreadCount - 1, 1)
     var nextStone: Stone { moves.count.isMultiple(of: 2) ? .black : .white }
     var lastMove: Move? { moves.last }
+    var engineColor: Stone {
+        switch mode {
+        case .engine: humanColor.opponent
+        case .selfPlay: nextStone
+        case .local: humanColor.opponent
+        }
+    }
     var canUndo: Bool {
-        mode == .local ? !moves.isEmpty : moves.contains { $0.stone == humanColor }
+        switch mode {
+        case .local, .selfPlay: !moves.isEmpty
+        case .engine: moves.contains { $0.stone == humanColor }
+        }
     }
     var statusTitle: String {
         switch phase {
@@ -96,7 +97,7 @@ final class GameStore: ObservableObject {
     }
     var statusDetail: String {
         switch phase {
-        case .idle: mode == .engine ? L10n.text("status.idle.engine") : L10n.text("status.idle.local")
+        case .idle: mode == .local ? L10n.text("status.idle.local") : L10n.text("status.idle.engine")
         case .humanTurn: L10n.text("status.place_stone")
         case .localTurn: rule.detail
         case .engineThinking: L10n.format("status.thinking.detail", timeoutSeconds)
@@ -121,8 +122,13 @@ final class GameStore: ObservableObject {
         engine.stop(); moves.removeAll(keepingCapacity: true); notice = nil; rebuildWhenReady = false
         if mode == .local { phase = .localTurn; return }
         guard validateEngine() else { return }
-        if engineColor == .black { phase = .engineThinking; launchEngine(rebuild: false) }
-        else { phase = .humanTurn }
+        if mode == .selfPlay {
+            phase = .engineThinking
+            launchEngine(rebuild: false)
+        } else {
+            if engineColor == .black { phase = .engineThinking; launchEngine(rebuild: false) }
+            else { phase = .humanTurn }
+        }
     }
 
     func play(at point: BoardPoint) {
@@ -139,6 +145,8 @@ final class GameStore: ObservableObject {
             phase = .engineThinking
             if engine.state == .ready { engine.requestMove(after: point) }
             else { launchEngine(rebuild: true) }
+        case .selfPlay:
+            break
         }
     }
 
@@ -147,6 +155,20 @@ final class GameStore: ObservableObject {
         notice = nil
         if mode == .local { moves.removeLast(); phase = .localTurn; return }
         engine.stop()
+        if mode == .selfPlay {
+            moves.removeLast()
+            phase = .engineThinking
+            if engine.state == .ready {
+                if moves.isEmpty {
+                    engine.requestOpeningMove()
+                } else {
+                    engine.requestMove(from: moves, engineColor: nextStone)
+                }
+            } else {
+                launchEngine(rebuild: true)
+            }
+            return
+        }
         var removedHuman = false
         while !moves.isEmpty {
             if moves.removeLast().stone == humanColor { removedHuman = true }
@@ -158,7 +180,8 @@ final class GameStore: ObservableObject {
     func resign() {
         guard !moves.isEmpty else { return }
         engine.stop()
-        phase = .gameOver(L10n.format("result.winner", mode == .engine ? engineColor.title : nextStone.opponent.title))
+        let winnerName = (mode == .local || mode == .selfPlay) ? nextStone.opponent.title : engineColor.title
+        phase = .gameOver(L10n.format("result.winner", winnerName))
     }
 
     func stone(at point: BoardPoint) -> Stone? { moves.last { $0.point == point }?.stone }
@@ -192,8 +215,15 @@ final class GameStore: ObservableObject {
 
     private func engineReady() {
         engine.configure(timeoutSeconds: timeoutSeconds, rule: rule, threadCount: threadCount)
-        if rebuildWhenReady || !moves.isEmpty { engine.requestMove(from: moves, engineColor: engineColor) }
-        else { engine.requestOpeningMove() }
+        if rebuildWhenReady || !moves.isEmpty {
+            engine.requestMove(from: moves, engineColor: engineColor)
+        } else {
+            if mode == .selfPlay || engineColor == .black {
+                engine.requestOpeningMove()
+            } else {
+                phase = .humanTurn
+            }
+        }
     }
 
     private func receiveEngineMove(_ point: BoardPoint) {
@@ -201,8 +231,20 @@ final class GameStore: ObservableObject {
         guard onBoard(point), stone(at: point) == nil else {
             phase = .error(L10n.format("error.engine.invalid_move", point.x, point.y)); return
         }
-        place(point, stone: engineColor)
-        if !finishIfNeeded(moves.last!) { phase = .humanTurn }
+        let currentStone = engineColor
+        place(point, stone: currentStone)
+        if !finishIfNeeded(moves.last!) {
+            if mode == .selfPlay {
+                phase = .engineThinking
+                if engine.state == .ready {
+                    engine.requestMove(from: moves, engineColor: nextStone)
+                } else {
+                    launchEngine(rebuild: true)
+                }
+            } else {
+                phase = .humanTurn
+            }
+        }
     }
 
     private func place(_ point: BoardPoint, stone: Stone) {
@@ -220,6 +262,11 @@ final class GameStore: ObservableObject {
 
     private func finishIfNeeded(_ move: Move) -> Bool {
         if isWinning(move) { engine.stop(); phase = .gameOver(L10n.format("result.winner", move.stone.title)); return true }
+        if rule == .renju && mode == .local && move.stone == .black && isForbidden(move.point) {
+            engine.stop()
+            phase = .gameOver(L10n.format("result.forbidden_loss", Stone.white.title))
+            return true
+        }
         if moves.count == boardSize * boardSize { engine.stop(); phase = .gameOver(L10n.text("result.draw")); return true }
         return false
     }
@@ -234,6 +281,220 @@ final class GameStore: ObservableObject {
             case .renju: return move.stone == .black ? count == 5 : count >= 5
             }
         }
+    }
+
+    // MARK: - Renju Forbidden Move Detection
+    //
+    // Implements the standard Renju forbidden-move rules for Black:
+    //   1. Overline (长连禁手): a line of 6 or more Black stones.
+    //   2. Double-Four (四四禁手): placing the stone creates two or more "fours" across all directions.
+    //      A "four" in this context means: a window of 5 consecutive points contains exactly 4 Black
+    //      stones and 1 empty point (the empty point is where Black could make a five), AND filling
+    //      that empty point would not extend the line beyond 5 (i.e., no overline would result).
+    //   3. Double-Three (三三禁手): placing the stone creates two or more "open threes" across all
+    //      directions. An open three is a three where adding one more Black stone (at the open point)
+    //      would form a live four (活四, two open ends), AND that open point is not itself a forbidden
+    //      point (which would mean the three can never legally become four).
+    //
+    // Rule: Black wins if exactly five are formed even if a forbidden pattern co-exists.
+    // (The isWinning check runs first in finishIfNeeded.)
+
+    private func isForbidden(_ point: BoardPoint) -> Bool {
+        // Overline: ≥ 6 consecutive Black stones in any direction
+        if hasOverline(at: point) { return true }
+
+        // Double-Four: ≥ 2 fours across all four directions
+        if countAllFours(at: point) >= 2 { return true }
+
+        // Double-Three: ≥ 2 genuine open-threes across all four directions
+        if countAllOpenThrees(at: point) >= 2 { return true }
+
+        return false
+    }
+
+    // MARK: Overline
+
+    private func hasOverline(at point: BoardPoint) -> Bool {
+        let dirs = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for (dx, dy) in dirs {
+            let total = 1
+                + count(from: point, stone: .black, dx:  dx, dy:  dy)
+                + count(from: point, stone: .black, dx: -dx, dy: -dy)
+            if total >= 6 { return true }
+        }
+        return false
+    }
+
+    // MARK: Double-Four
+
+    /// Total number of "fours" that `point` (a Black stone) participates in.
+    /// A four in a direction (dx,dy) is any window of 5 consecutive cells that
+    ///   • contains exactly 4 Black stones (including `point`) and 1 empty cell, AND
+    ///   • filling the empty cell would produce exactly 5 (not 6+) Black stones in that line.
+    private func countAllFours(at point: BoardPoint) -> Int {
+        let dirs = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        var total = 0
+        for (dx, dy) in dirs {
+            total += countFoursInDirection(at: point, dx: dx, dy: dy)
+        }
+        return total
+    }
+
+    private func countFoursInDirection(at point: BoardPoint, dx: Int, dy: Int) -> Int {
+        var fourCount = 0
+        // Slide a window of 5 over every position that includes `point`.
+        // offset = position of `point` within the window (0..4)
+        for offset in 0 ..< 5 {
+            let start = BoardPoint(x: point.x - offset * dx, y: point.y - offset * dy)
+            var blacks = 0
+            var emptyPos: BoardPoint? = nil
+            var valid = true
+
+            for i in 0 ..< 5 {
+                let p = BoardPoint(x: start.x + i * dx, y: start.y + i * dy)
+                guard onBoard(p) else { valid = false; break }
+                switch stone(at: p) {
+                case .black: blacks += 1
+                case .white: valid = false; break
+                case .none:
+                    if emptyPos != nil { valid = false; break } // two empties → not a four
+                    emptyPos = p
+                }
+                if !valid { break }
+            }
+
+            guard valid, blacks == 4, let ep = emptyPos else { continue }
+
+            // Confirm filling `ep` does NOT create an overline (would exceed 5).
+            // Count continuations from ep in both directions of the same axis.
+            let ext = 1
+                + count(from: ep, stone: .black, dx:  dx, dy:  dy)
+                + count(from: ep, stone: .black, dx: -dx, dy: -dy)
+            if ext == 5 {
+                fourCount += 1
+            }
+        }
+        return fourCount
+    }
+
+    // MARK: Double-Three
+
+    /// Total number of genuine "open threes" that `point` (a Black stone) participates in.
+    private func countAllOpenThrees(at point: BoardPoint) -> Int {
+        let dirs = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        var total = 0
+        for (dx, dy) in dirs {
+            if hasOpenThreeInDirection(at: point, dx: dx, dy: dy) { total += 1 }
+        }
+        return total
+    }
+
+    /// Returns true if placing at `point` creates an open-three in the given direction.
+    ///
+    /// An open-three is defined as: a 3-stone pattern that, by adding one more Black stone
+    /// at a specific point `q`, would form a live-four (活四) — meaning `q` has at least
+    /// one open end on each side of the resulting 4-stone line — AND `q` itself is not a
+    /// forbidden point (so the three can legally promote to four).
+    ///
+    /// We enumerate candidate "four-extension" points `q` adjacent to or within the cluster,
+    /// then verify each one would form an open four.
+    private func hasOpenThreeInDirection(at point: BoardPoint, dx: Int, dy: Int) -> Bool {
+        // Collect the run of Black stones that include `point` in this direction,
+        // plus the immediate empty cells flanking each end.
+        let fwdBlacks = count(from: point, stone: .black, dx:  dx, dy:  dy)
+        let bwdBlacks = count(from: point, stone: .black, dx: -dx, dy: -dy)
+        let runLen = 1 + fwdBlacks + bwdBlacks  // total connected Black stones including `point`
+
+        // For an open-three we need exactly 3 Black in a connected run (possibly with one gap).
+        // We handle both: solid run of 3 (○○○) and split run with one gap (○○_○ / ○_○○).
+
+        // Strategy: find candidate "fourth stone" positions `q` that could be added to
+        // extend this group to a four, then test whether doing so creates an open four.
+        var candidateQs: [BoardPoint] = []
+
+        if runLen == 3 {
+            // Solid three: look at both ends for a place to extend to four
+            let fwdEnd = BoardPoint(x: point.x + (fwdBlacks + 1) * dx,
+                                   y: point.y + (fwdBlacks + 1) * dy)
+            let bwdEnd = BoardPoint(x: point.x - (bwdBlacks + 1) * dx,
+                                   y: point.y - (bwdBlacks + 1) * dy)
+            if onBoard(fwdEnd) && stone(at: fwdEnd) == nil { candidateQs.append(fwdEnd) }
+            if onBoard(bwdEnd) && stone(at: bwdEnd) == nil { candidateQs.append(bwdEnd) }
+        } else if runLen == 2 {
+            // Might be a split three: look one beyond each end and also one "inside" gap
+            // Forward: _○○_ → the gap is one step beyond fwdEnd
+            let fwdEnd = BoardPoint(x: point.x + (fwdBlacks + 1) * dx,
+                                   y: point.y + (fwdBlacks + 1) * dy)
+            let bwdEnd = BoardPoint(x: point.x - (bwdBlacks + 1) * dx,
+                                   y: point.y - (bwdBlacks + 1) * dy)
+            // Check if there is a black stone one further beyond the gap (○_○ pattern)
+            let fwdBeyond = BoardPoint(x: fwdEnd.x + dx, y: fwdEnd.y + dy)
+            let bwdBeyond = BoardPoint(x: bwdEnd.x - dx, y: bwdEnd.y - dy)
+            if onBoard(fwdEnd) && stone(at: fwdEnd) == nil {
+                if onBoard(fwdBeyond) && stone(at: fwdBeyond) == .black {
+                    // Split pattern: run of 2 + gap + 1 black → "q" fills the gap
+                    candidateQs.append(fwdEnd)
+                } else {
+                    // Extending the solid run of 2 to make 3: not our job here
+                    // (we want three→four candidates, not two→three)
+                    _ = fwdEnd
+                }
+            }
+            if onBoard(bwdEnd) && stone(at: bwdEnd) == nil {
+                if onBoard(bwdBeyond) && stone(at: bwdBeyond) == .black {
+                    candidateQs.append(bwdEnd)
+                }
+            }
+        } else if runLen == 1 {
+            // Single stone at `point`; look for ○_○ split patterns in each direction
+            let fwdGap  = BoardPoint(x: point.x + dx,       y: point.y + dy)
+            let fwdBlk  = BoardPoint(x: point.x + 2 * dx,   y: point.y + 2 * dy)
+            let bwdGap  = BoardPoint(x: point.x - dx,       y: point.y - dy)
+            let bwdBlk  = BoardPoint(x: point.x - 2 * dx,   y: point.y - 2 * dy)
+            if onBoard(fwdGap) && stone(at: fwdGap) == nil &&
+               onBoard(fwdBlk) && stone(at: fwdBlk) == .black {
+                candidateQs.append(fwdGap)
+            }
+            if onBoard(bwdGap) && stone(at: bwdGap) == nil &&
+               onBoard(bwdBlk) && stone(at: bwdBlk) == .black {
+                candidateQs.append(bwdGap)
+            }
+        }
+
+        // For each candidate "q", test whether adding a Black stone at q would form an open four
+        // in the (dx,dy) direction AND q is not itself a forbidden point.
+        for q in candidateQs {
+            if wouldFormOpenFour(at: q, dx: dx, dy: dy) && !isForbiddenIfPlaced(at: q) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Would placing a Black stone at `q` create an open-four (活四) in the given direction?
+    /// An open-four has 4 Black stones in a row with both ends free (and the run is exactly 4).
+    private func wouldFormOpenFour(at q: BoardPoint, dx: Int, dy: Int) -> Bool {
+        guard stone(at: q) == nil else { return false }
+        // Simulate placing at q
+        let fwd = count(from: q, stone: .black, dx:  dx, dy:  dy)
+        let bwd = count(from: q, stone: .black, dx: -dx, dy: -dy)
+        let run = 1 + fwd + bwd
+        guard run == 4 else { return false }
+        // Both ends must be empty (open four)
+        let fwdEnd = BoardPoint(x: q.x + (fwd + 1) * dx, y: q.y + (fwd + 1) * dy)
+        let bwdEnd = BoardPoint(x: q.x - (bwd + 1) * dx, y: q.y - (bwd + 1) * dy)
+        let fwdOpen = onBoard(fwdEnd) && stone(at: fwdEnd) == nil
+        let bwdOpen = onBoard(bwdEnd) && stone(at: bwdEnd) == nil
+        return fwdOpen && bwdOpen
+    }
+
+    /// Check if placing a Black stone at `q` (which is currently empty) would make it a
+    /// forbidden point, but WITHOUT actually mutating `moves`. We temporarily append and pop.
+    private func isForbiddenIfPlaced(at q: BoardPoint) -> Bool {
+        moves.append(Move(point: q, stone: .black))
+        let result = isForbidden(q)
+        moves.removeLast()
+        return result
     }
 
     private func count(from point: BoardPoint, stone: Stone, dx: Int, dy: Int) -> Int {

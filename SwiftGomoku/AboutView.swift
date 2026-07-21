@@ -16,29 +16,12 @@ struct AboutView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            #if os(macOS)
-            Image(nsImage: NSApp.applicationIconImage)
+            Image("AppIconImage")
                 .resizable()
-                .frame(width: 72, height: 72)
-            #elseif os(iOS)
-            Group {
-                if let iconName = (Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])?["CFBundlePrimaryIcon"]
-                    .flatMap({ ($0 as? [String: Any])?["CFBundleIconFiles"] as? [String] })?.last,
-                   let uiImage = UIImage(named: iconName) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                } else if let uiImage = UIImage(named: "AppIcon") {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                } else {
-                    Image(systemName: "gamecontroller.fill")
-                        .resizable()
-                        .foregroundStyle(.tint)
-                }
-            }
-            .frame(width: 72, height: 72)
-            .cornerRadius(16)
-            #endif
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
 
             VStack(spacing: 4) {
                 Text("Swift Gomoku")

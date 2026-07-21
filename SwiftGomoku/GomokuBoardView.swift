@@ -66,50 +66,134 @@ struct GomokuBoardView: View {
     }
 
     private func drawBoard(in rect: CGRect, context: inout GraphicsContext) {
-        let padding = max(26, rect.width * 0.055), span = rect.width - padding * 2
-        let cell = span / CGFloat(boardSize - 1), origin = CGPoint(x: rect.minX + padding, y: rect.minY + padding)
+        let padding = max(24, rect.width * 0.065), span = rect.width - padding * 2
+        let cell = span / CGFloat(boardSize - 1)
+        let origin = CGPoint(x: rect.minX + padding, y: rect.minY + padding)
+
+        // 1. Inner grid lines
         var grid = Path()
         for i in 0..<boardSize {
             let offset = CGFloat(i) * cell
-            grid.move(to: CGPoint(x: origin.x, y: origin.y + offset)); grid.addLine(to: CGPoint(x: origin.x + span, y: origin.y + offset))
-            grid.move(to: CGPoint(x: origin.x + offset, y: origin.y)); grid.addLine(to: CGPoint(x: origin.x + offset, y: origin.y + span))
+            grid.move(to: CGPoint(x: origin.x, y: origin.y + offset))
+            grid.addLine(to: CGPoint(x: origin.x + span, y: origin.y + offset))
+            grid.move(to: CGPoint(x: origin.x + offset, y: origin.y))
+            grid.addLine(to: CGPoint(x: origin.x + offset, y: origin.y + span))
         }
-        context.stroke(grid, with: .color(.black.opacity(0.58)), lineWidth: max(0.65, cell * 0.026))
+        context.stroke(grid, with: .color(.black.opacity(0.65)), lineWidth: max(0.7, cell * 0.026))
+
+        // Outer border
+        let outerRect = CGRect(x: origin.x, y: origin.y, width: span, height: span)
+        context.stroke(Path(outerRect), with: .color(.black.opacity(0.85)), lineWidth: max(1.6, cell * 0.055))
+
+        // 2. Star points
         for point in stars {
-            let center = screenPoint(point, origin: origin, cell: cell), d = max(4, cell * 0.16)
-            context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(.black.opacity(0.72)))
+            let center = screenPoint(point, origin: origin, cell: cell)
+            let d = max(4, cell * 0.16)
+            context.fill(Path(ellipseIn: CGRect(x: center.x - d/2, y: center.y - d/2, width: d, height: d)), with: .color(.black.opacity(0.85)))
         }
-        // Ghost stone: hover on macOS, pending (first-tap) on iOS
+
+        // 3. Board Coordinate Labels (Letters & Numbers)
+        let labelFontSize = max(9, cell * 0.38)
+        let labelFont = Font.system(size: labelFontSize, weight: .bold, design: .default)
+        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+        for i in 0..<boardSize {
+            let xPos = origin.x + CGFloat(i) * cell
+            let letter = i < letters.count ? String(letters[i]) : "\(i + 1)"
+
+            // Bottom letter label
+            context.draw(
+                Text(letter).font(labelFont).foregroundColor(.black.opacity(0.85)),
+                at: CGPoint(x: xPos, y: origin.y + span + padding * 0.48),
+                anchor: .center
+            )
+            // Top letter label
+            context.draw(
+                Text(letter).font(labelFont).foregroundColor(.black.opacity(0.85)),
+                at: CGPoint(x: xPos, y: origin.y - padding * 0.48),
+                anchor: .center
+            )
+
+            let yPos = origin.y + CGFloat(i) * cell
+            let rowNumber = "\(boardSize - i)"
+
+            // Left row number label
+            context.draw(
+                Text(rowNumber).font(labelFont).foregroundColor(.black.opacity(0.85)),
+                at: CGPoint(x: origin.x - padding * 0.48, y: yPos),
+                anchor: .center
+            )
+            // Right row number label
+            context.draw(
+                Text(rowNumber).font(labelFont).foregroundColor(.black.opacity(0.85)),
+                at: CGPoint(x: origin.x + span + padding * 0.48, y: yPos),
+                anchor: .center
+            )
+        }
+
+        // 4. Ghost stone (hover on macOS, pending on iOS)
         #if os(iOS)
         let ghostPoint = pendingPoint
         #else
         let ghostPoint = hoveredPoint
         #endif
         if let ghostPoint, !moves.contains(where: { $0.point == ghostPoint }) {
-            let center = screenPoint(ghostPoint, origin: origin, cell: cell), d = cell * 0.76
+            let center = screenPoint(ghostPoint, origin: origin, cell: cell)
+            let d = cell * 0.82
             let color: Color = moves.count.isMultiple(of: 2) ? .black : .white
             #if os(iOS)
-            // More visible ghost on iOS (pending confirmation)
-            context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(color.opacity(0.45)))
+            context.fill(Path(ellipseIn: CGRect(x: center.x - d/2, y: center.y - d/2, width: d, height: d)), with: .color(color.opacity(0.45)))
             #else
-            context.fill(Path(ellipseIn: CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)), with: .color(color.opacity(0.25)))
+            context.fill(Path(ellipseIn: CGRect(x: center.x - d/2, y: center.y - d/2, width: d, height: d)), with: .color(color.opacity(0.25)))
             #endif
         }
-        for (index, move) in moves.enumerated() { drawStone(move, last: index == moves.count-1, origin: origin, cell: cell, context: &context) }
+
+        // 5. Stones with move numbers
+        for (index, move) in moves.enumerated() {
+            drawStone(move, number: index + 1, last: index == moves.count - 1, origin: origin, cell: cell, context: &context)
+        }
     }
 
-    private func drawStone(_ move: Move, last: Bool, origin: CGPoint, cell: CGFloat, context: inout GraphicsContext) {
-        let center = screenPoint(move.point, origin: origin, cell: cell), d = cell * 0.82
-        let rect = CGRect(x: center.x-d/2, y: center.y-d/2, width: d, height: d)
+    private func drawStone(_ move: Move, number: Int, last: Bool, origin: CGPoint, cell: CGFloat, context: inout GraphicsContext) {
+        let center = screenPoint(move.point, origin: origin, cell: cell)
+        let d = cell * 0.84
+        let rect = CGRect(x: center.x - d/2, y: center.y - d/2, width: d, height: d)
+
+        // Stone shadow & radial gradient body
         context.drawLayer { layer in
-            layer.addFilter(.shadow(color: .black.opacity(0.28), radius: cell*0.09, x: cell*0.04, y: cell*0.07))
-            let colors: [Color] = move.stone == .black ? [Color(white: 0.27), Color(white: 0.025)] : [.white, Color(white: 0.72)]
-            layer.fill(Path(ellipseIn: rect), with: .radialGradient(Gradient(colors: colors),
-                center: CGPoint(x: rect.minX+d*0.34, y: rect.minY+d*0.28), startRadius: 0, endRadius: d*0.72))
+            layer.addFilter(.shadow(color: .black.opacity(0.3), radius: cell * 0.08, x: cell * 0.04, y: cell * 0.06))
+            let colors: [Color] = move.stone == .black ? [Color(white: 0.28), Color(white: 0.02)] : [.white, Color(white: 0.76)]
+            layer.fill(Path(ellipseIn: rect), with: .radialGradient(
+                Gradient(colors: colors),
+                center: CGPoint(x: rect.minX + d * 0.34, y: rect.minY + d * 0.28),
+                startRadius: 0,
+                endRadius: d * 0.72
+            ))
         }
+
+        // Move number text
+        let numFontSize = max(8, cell * 0.44)
+        let textColor: Color
         if last {
-            let marker = max(4, cell*0.16)
-            context.fill(Path(ellipseIn: CGRect(x: center.x-marker/2, y: center.y-marker/2, width: marker, height: marker)), with: .color(.red.opacity(0.9)))
+            textColor = .red
+        } else {
+            textColor = move.stone == .black ? .white : .black
+        }
+        let numFont = Font.system(size: numFontSize, weight: .bold, design: .rounded)
+        context.draw(
+            Text("\(number)").font(numFont).foregroundColor(textColor),
+            at: center,
+            anchor: .center
+        )
+
+        // Last move indicator ring
+        if last {
+            let ringRadius = d * 0.46
+            context.stroke(
+                Path(ellipseIn: CGRect(x: center.x - ringRadius, y: center.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)),
+                with: .color(.red.opacity(0.85)),
+                lineWidth: max(1.2, cell * 0.04)
+            )
         }
     }
 
@@ -121,10 +205,10 @@ struct GomokuBoardView: View {
         CGPoint(x: origin.x + CGFloat(point.x)*cell, y: origin.y + CGFloat(point.y)*cell)
     }
     private func point(at location: CGPoint, in rect: CGRect) -> BoardPoint? {
-        let padding = max(26, rect.width*0.055), cell = (rect.width-padding*2)/CGFloat(boardSize-1)
-        let x = Int(round((location.x-rect.minX-padding)/cell)), y = Int(round((location.y-rect.minY-padding)/cell))
+        let padding = max(24, rect.width * 0.065), cell = (rect.width - padding * 2) / CGFloat(boardSize - 1)
+        let x = Int(round((location.x - rect.minX - padding) / cell)), y = Int(round((location.y - rect.minY - padding) / cell))
         guard (0..<boardSize).contains(x), (0..<boardSize).contains(y) else { return nil }
-        let point = BoardPoint(x: x, y: y), center = screenPoint(point, origin: CGPoint(x: rect.minX+padding, y: rect.minY+padding), cell: cell)
-        return hypot(location.x-center.x, location.y-center.y) <= cell*0.48 ? point : nil
+        let point = BoardPoint(x: x, y: y), center = screenPoint(point, origin: CGPoint(x: rect.minX + padding, y: rect.minY + padding), cell: cell)
+        return hypot(location.x - center.x, location.y - center.y) <= cell * 0.48 ? point : nil
     }
 }

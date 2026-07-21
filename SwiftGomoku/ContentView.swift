@@ -29,18 +29,34 @@ struct ContentView: View {
     }
 
     private var splitViewLayout: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            configurationSidebar
-                .navigationSplitViewColumnWidth(min: 250, ideal: 280, max: 320)
-        } detail: {
-            gameArea
+        HStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                configurationSidebar
+                    .navigationSplitViewColumnWidth(min: 250, ideal: 280, max: 320)
+            } detail: {
+                #if os(iOS)
+                NavigationStack {
+                    gameArea
+                        .navigationTitle("Swift Gomoku")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { gameToolbar }
+                }
+                #else
+                gameArea
+                #endif
+            }
+
+            if game.showsProtocolLog {
+                Divider()
+                ProtocolLogView(engine: game.engine)
+                    .frame(width: 320)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        #if os(macOS)
         .navigationTitle("Swift Gomoku")
         .toolbar { gameToolbar }
-        .inspector(isPresented: $game.showsProtocolLog) {
-            ProtocolLogView(engine: game.engine)
-                .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
-        }
+        #endif
         .confirmationDialog(
             L10n.text("dialog.new_game.title"),
             isPresented: $confirmsNewGame,
@@ -66,6 +82,7 @@ struct ContentView: View {
             AboutView_iOS()
         }
         #endif
+        .onAppear { game.showsProtocolLog = false }
         .onDisappear { game.shutdown() }
     }
 
@@ -151,13 +168,22 @@ struct ContentView: View {
                             Text(Stone.white.title).tag(Stone.white)
                         }
                         .pickerStyle(.segmented)
+                    }
 
+                    if game.mode != .local {
                         Picker(L10n.text("menu.thinking_time"), selection: $game.timeoutSeconds) {
                             ForEach(GameMenuOptions.timeoutSeconds, id: \.self) { seconds in
                                 Text(L10n.format("duration.seconds", seconds)).tag(seconds)
                             }
                         }
                     }
+
+                    Button(action: requestNewGame) {
+                        Label(L10n.text("button.start_new_game"), systemImage: "play.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
 
                 Section(L10n.text("section.board")) {
@@ -176,7 +202,7 @@ struct ContentView: View {
                 }
 
                 Section(L10n.text("section.current")) {
-                    if game.mode == .engine {
+                    if game.mode != .local {
                         LabeledContent(L10n.text("section.engine"), value: game.engineDisplayName)
                         LabeledContent(L10n.text("menu.search_threads"), value: "\(game.threadCount)")
                         LabeledContent(
@@ -184,7 +210,7 @@ struct ContentView: View {
                             value: L10n.format("duration.seconds", game.timeoutSeconds)
                         )
 
-                        if game.enginePath.isEmpty {
+                        if !game.isUsingBundledEngine && game.enginePath.isEmpty {
                             Label(L10n.text("engine.bundled.intel_notice"), systemImage: "exclamationmark.triangle")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
@@ -273,7 +299,7 @@ struct ContentView: View {
                 gameSetupMenu
                 boardSetupMenu
 
-                if game.mode == .engine {
+                if game.mode != .local {
                     engineSetupMenu
                 }
 
@@ -289,11 +315,12 @@ struct ContentView: View {
                 Label(L10n.text("toolbar.more"), systemImage: "ellipsis.circle")
             }
             .help(L10n.text("help.more"))
-
             Button {
-                game.showsProtocolLog.toggle()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    game.showsProtocolLog.toggle()
+                }
             } label: {
-                Label(L10n.text("toolbar.protocol_log"), systemImage: "terminal")
+                Image(systemName: "terminal")
             }
             .help(L10n.text("help.protocol_log"))
         }
@@ -314,7 +341,9 @@ struct ContentView: View {
                         Text(stone.title).tag(stone)
                     }
                 }
+            }
 
+            if game.mode != .local {
                 Picker(L10n.text("menu.thinking_time"), selection: $game.timeoutSeconds) {
                     ForEach(GameMenuOptions.timeoutSeconds, id: \.self) { seconds in
                         Text(L10n.format("duration.seconds", seconds)).tag(seconds)
@@ -345,6 +374,7 @@ struct ContentView: View {
             Button(game.engineDisplayName) { }
                 .disabled(true)
 
+            #if os(macOS)
             Button(L10n.text("button.import_engine"), systemImage: "square.and.arrow.down") {
                 EngineSelectionPanel.present(for: game)
             }
@@ -356,6 +386,7 @@ struct ContentView: View {
             }
 
             Divider()
+            #endif
 
             Menu(L10n.format("label.threads", game.threadCount)) {
                 Button(L10n.text("menu.decrease_threads"), systemImage: "minus") {
@@ -500,6 +531,11 @@ private struct ProtocolLogView: View {
 
                 Spacer()
 
+                Button(action: copyAllLogs) {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                .disabled(engine.logs.isEmpty)
+
                 Button(L10n.text("button.clear"), action: engine.clearLogs)
                     .disabled(engine.logs.isEmpty)
             }
@@ -527,11 +563,11 @@ private struct ProtocolLogView: View {
                                     .frame(width: 13)
                                 Text(line.text)
                                     .font(.caption.monospaced())
-                                    .textSelection(.enabled)
                             }
                             .id(line.id)
                         }
                     }
+                    .textSelection(.enabled)
                     .padding(14)
                 }
                 .onChange(of: engine.logs.count) {
@@ -541,6 +577,16 @@ private struct ProtocolLogView: View {
                 }
             }
         }
+    }
+
+    private func copyAllLogs() {
+        let text = engine.logs.map { "\(symbol(for: $0.direction)) \($0.text)" }.joined(separator: "\n")
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #elseif os(iOS)
+        UIPasteboard.general.string = text
+        #endif
     }
 
     private func symbol(for direction: PiskvorkEngine.LogLine.Direction) -> String {

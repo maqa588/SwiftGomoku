@@ -1,7 +1,8 @@
 "stone.black" = "Black";
 "stone.white" = "White";
-"mode.engine" = "Human vs Engine";
-"mode.local" = "Two Players";
+"mode.engine" = "Human vs AI";
+"mode.local" = "Local 2P";
+"mode.self_play" = "AI vs AI";
 "rule.freestyle" = "Freestyle";
 "rule.exact_five" = "Exactly Five";
 "rule.renju" = "Renju";
@@ -19,7 +20,8 @@
 "status.place_stone" = "Place a stone on an intersection";
 "status.thinking.detail" = "Up to %d seconds per move";
 "status.game_over.detail" = "%d moves";
-"result.winner" = "%@ Wins";
+"result.winner" = "%@ wins";
+"result.forbidden_loss" = "Black played forbidden move. %@ wins!";
 "result.draw" = "Draw";
 
 "engine.state.stopped" = "Not Running";
@@ -64,6 +66,7 @@
 "button.choose" = "Choose…";
 "button.select" = "Choose";
 "button.clear" = "Clear";
+"button.start_new_game" = "Start New Game";
 "engine.choose_hint" = "Choose Rapfi or another Piskvork-compatible engine.";
 "moves.count" = "%d moves";
 

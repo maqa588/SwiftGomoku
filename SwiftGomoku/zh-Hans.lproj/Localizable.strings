@@ -1,7 +1,8 @@
 "stone.black" = "黑方";
 "stone.white" = "白方";
-"mode.engine" = "人机对弈";
-"mode.local" = "双人对弈";
+"mode.engine" = "人机";
+"mode.local" = "双人";
+"mode.self_play" = "机器";
 "rule.freestyle" = "无禁手";
 "rule.exact_five" = "恰好五连";
 "rule.renju" = "连珠规则";
@@ -20,6 +21,7 @@
 "status.thinking.detail" = "每步最多 %d 秒";
 "status.game_over.detail" = "共 %d 手";
 "result.winner" = "%@获胜";
+"result.forbidden_loss" = "黑方禁手，%@获胜";
 "result.draw" = "和棋";
 
 "engine.state.stopped" = "未启动";
@@ -64,6 +66,7 @@
 "button.choose" = "选择…";
 "button.select" = "选择";
 "button.clear" = "清除";
+"button.start_new_game" = "开始新对局";
 "engine.choose_hint" = "选择 Rapfi 或其他兼容 Piskvork 协议的引擎。";
 "moves.count" = "%d 手";
 
