@@ -16,12 +16,21 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
+    #if os(iOS)
+    @State private var showingLogSheet = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    #endif
+
     var body: some View {
         #if os(macOS)
         splitViewLayout
         #else
         if horizontalSizeClass == .compact {
-            iphoneLayout
+            if verticalSizeClass == .compact {
+                iphoneLandscapeLayout
+            } else {
+                iphonePortraitLayout
+            }
         } else {
             splitViewLayout
         }
@@ -87,7 +96,9 @@ struct ContentView: View {
     }
 
     #if os(iOS)
-    private var iphoneLayout: some View {
+    // MARK: - iPhone Portrait Layout
+
+    private var iphonePortraitLayout: some View {
         NavigationStack {
             gameArea
                 .navigationTitle("Swift Gomoku")
@@ -108,10 +119,18 @@ struct ContentView: View {
                             Label(L10n.text("toolbar.undo"), systemImage: "arrow.uturn.backward")
                         }
                         .disabled(!game.canUndo)
+                        Button {
+                            showingLogSheet.toggle()
+                        } label: {
+                            Image(systemName: "terminal")
+                        }
                     }
                 }
                 .sheet(isPresented: $showingSettingsSheet) {
                     iphoneSettingsSheet
+                }
+                .sheet(isPresented: $showingLogSheet) {
+                    iphoneLogSheet
                 }
                 .confirmationDialog(
                     L10n.text("dialog.new_game.title"),
@@ -133,6 +152,123 @@ struct ContentView: View {
                 }
         }
         .onDisappear { game.shutdown() }
+    }
+
+    // MARK: - iPhone Landscape Layout
+
+    private var iphoneLandscapeLayout: some View {
+        HStack(spacing: 0) {
+            // Board: fill full height, no status header above
+            GomokuBoardView(
+                boardSize: game.boardSize,
+                moves: game.moves,
+                isInteractive: boardIsInteractive,
+                onPlay: game.play
+            )
+            .padding(6)
+            .background(Color.boardBackground)
+
+            // Right panel: status + controls + optional log
+            VStack(spacing: 0) {
+                // Compact status bar
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(game.statusTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(L10n.format("board.summary", game.boardSize, game.boardSize, game.rule.title))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let last = game.lastMove {
+                            Text(coordinate(last.point))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let notice = game.notice {
+                        Text(notice)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+
+                Divider()
+
+                // Toolbar buttons
+                HStack(spacing: 12) {
+                    Button { showingSettingsSheet = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    Button(action: requestNewGame) {
+                        Image(systemName: "play.fill")
+                    }
+                    Button(action: game.undo) {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .disabled(!game.canUndo)
+
+                    Spacer()
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            game.showsProtocolLog.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "terminal")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+
+                Divider()
+
+                // Log area or empty space
+                if game.showsProtocolLog {
+                    ProtocolLogView(engine: game.engine)
+                } else {
+                    Spacer()
+                }
+            }
+            .frame(width: 260)
+            .background(Color.boardBackground)
+        }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .sheet(isPresented: $showingSettingsSheet) {
+            iphoneSettingsSheet
+        }
+        .confirmationDialog(
+            L10n.text("dialog.new_game.title"),
+            isPresented: $confirmsNewGame,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("dialog.new_game.confirm"), role: .destructive, action: game.startNewGame)
+        } message: {
+            Text(L10n.text("dialog.new_game.message"))
+        }
+        .confirmationDialog(
+            L10n.text("dialog.resign.title"),
+            isPresented: $confirmsResign,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("toolbar.resign"), role: .destructive, action: game.resign)
+        } message: {
+            Text(L10n.text("dialog.resign.message"))
+        }
+        .onDisappear { game.shutdown() }
+    }
+
+    // MARK: - iPhone Log Sheet (draggable bottom card)
+
+    private var iphoneLogSheet: some View {
+        ProtocolLogView(engine: game.engine)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
     }
 
     private var iphoneSettingsSheet: some View {
